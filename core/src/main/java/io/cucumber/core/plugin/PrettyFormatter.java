@@ -4,10 +4,12 @@ import io.cucumber.core.exception.CucumberException;
 import io.cucumber.plugin.ColorAware;
 import io.cucumber.plugin.ConcurrentEventListener;
 import io.cucumber.plugin.event.Argument;
+import io.cucumber.plugin.event.DataTableArgument;
 import io.cucumber.plugin.event.EmbedEvent;
 import io.cucumber.plugin.event.EventPublisher;
 import io.cucumber.plugin.event.PickleStepTestStep;
 import io.cucumber.plugin.event.Result;
+import io.cucumber.plugin.event.StepArgument;
 import io.cucumber.plugin.event.TestCase;
 import io.cucumber.plugin.event.TestCaseStarted;
 import io.cucumber.plugin.event.TestRunFinished;
@@ -21,19 +23,24 @@ import java.io.OutputStream;
 import java.io.StringReader;
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.stream.IntStream;
 
 import static io.cucumber.core.exception.ExceptionUtils.printStackTrace;
 import static io.cucumber.core.plugin.Formats.ansi;
 import static io.cucumber.core.plugin.Formats.monochrome;
 import static java.lang.Math.max;
 import static java.util.Locale.ROOT;
+import static java.util.stream.Collectors.toList;
 
 public final class PrettyFormatter implements ConcurrentEventListener, ColorAware {
+
+    private Boolean printTable = false;
 
     private static final String SCENARIO_INDENT = "";
     private static final String STEP_INDENT = "  ";
@@ -127,6 +134,15 @@ public final class PrettyFormatter implements ConcurrentEventListener, ColorAwar
                 formats.get(status + "_arg"), testStep.getDefinitionArgument());
             String locationIndent = calculateLocationIndent(event.getTestCase(), formatPlainStep(keyword, stepText));
             out.println(STEP_INDENT + formattedStepText + locationIndent + formatLocation(testStep.getCodeLocation()));
+
+            StepArgument stepArgument = testStep.getStep().getArgument();
+            if (stepArgument != null && DataTableArgument.class.isInstance(stepArgument)) {
+                DataTableArgument dataTableArgument = (DataTableArgument) stepArgument;
+                List<String> formattedDataTable = formatDataTable(formats.get(status), dataTableArgument);
+                for (String formattedRow : formattedDataTable) {
+                    out.println(STEP_INDENT + STEP_INDENT + formattedRow);
+                }
+            }
         }
     }
 
@@ -233,6 +249,24 @@ public final class PrettyFormatter implements ConcurrentEventListener, ColorAwar
             result.append(textFormat.text(text));
         }
         return result.toString();
+    }
+
+    List<String> formatDataTable(Format textFormat, DataTableArgument dataTableArgument) {
+        List<Integer> columnLengths = dataTableArgument.cells().stream()
+                .map(row -> row.stream().map(cell -> cell.length()).collect(toList()))
+                .reduce((previous, row) -> IntStream.range(0, row.size())
+                        .map(i -> max(previous.get(i), row.get(i)))
+                        .boxed().collect(toList()))
+                .orElse(null);
+
+        List<String> results = dataTableArgument.cells().stream()
+                .map(row -> IntStream.range(0, row.size())
+                        .boxed()
+                        .map(i -> String.format(" %-" + (columnLengths.get(i)) + "s |", row.get(i)))
+                        .reduce("|", (rowText, cellText) -> rowText + cellText))
+                .collect(toList());
+
+        return results;
     }
 
     @Override
